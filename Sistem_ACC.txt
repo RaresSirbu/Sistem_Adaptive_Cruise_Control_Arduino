@@ -1,0 +1,100 @@
+#include <Arduino.h>
+#define TRIG_PIN=D9
+#define ECHO_PIN=D8
+#define POTENTIOMETRU=A0
+#define MOTOR_IN1=D4
+#define MOTOR_IN2=D5
+#define MOTOR_ENA=D6
+#define BUZZER=D10
+#define LED_STATUS=D11
+const float DISTANTA_SIGURANTA = 50.0;
+const float DISTANTA_PERICOL   = 20.0;
+const int   VITEZA_MAXIMA      = 200;
+const unsigned long INTERVAL_CITIRE = 100;
+const unsigned long INTERVAL_SMOOTH = 50;
+float distantaCurenta = 0;
+int vitezaTinta = 0;
+int vitezaCurenta = 0;
+int valoarePot = 0;
+bool alertaActiva = false;
+unsigned long ultimaCitire = 0;
+unsigned long ultimulSmooth = 0;
+unsigned long ultimulBip = 0;
+float citesteDistanta() {
+  digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  long durata = pulseIn(ECHO_PIN, HIGH, 30000);
+  if (durata == 0) return 999.0;
+  return durata * 0.034 / 2;
+}
+int calculeazaViteza() {
+  int vitezaSetata = constrain(map(valoarePot, 0, 1023, 0, VITEZA_MAXIMA), 0, VITEZA_MAXIMA);
+  if (distantaCurenta > DISTANTA_SIGURANTA) {
+    alertaActiva = false;
+    return vitezaSetata;
+  }
+  if (distantaCurenta <= DISTANTA_PERICOL) {
+    alertaActiva = true;
+    return 0;
+  }
+  alertaActiva = false;
+  float factor = (distantaCurenta - DISTANTA_PERICOL) / (DISTANTA_SIGURANTA - DISTANTA_PERICOL);
+  return (int)(vitezaSetata * factor);
+}
+void controleazaMotor(int viteza) {
+  if (viteza > 0) {
+    digitalWrite(MOTOR_IN1, HIGH);
+    digitalWrite(MOTOR_IN2, LOW);
+    analogWrite(MOTOR_ENA, viteza);
+  } else {
+    digitalWrite(MOTOR_IN1, LOW);
+    digitalWrite(MOTOR_IN2, LOW);
+    analogWrite(MOTOR_ENA, 0);
+  }
+}
+void smoothViteza() {
+  unsigned long acum = millis();
+  if (acum - ultimulSmooth < INTERVAL_SMOOTH) return;
+  ultimulSmooth = acum;
+  if (vitezaTinta == 0) vitezaCurenta = 0;
+  else if (vitezaCurenta < vitezaTinta) vitezaCurenta = min(vitezaCurenta + 5, vitezaTinta);
+  else if (vitezaCurenta > vitezaTinta) vitezaCurenta = max(vitezaCurenta - 5, vitezaTinta);
+  controleazaMotor(vitezaCurenta);
+}
+void gestioneazaAlerta() {
+  unsigned long acum = millis();
+  if (alertaActiva) {
+    if (acum - ultimulBip >= 200) {
+      ultimulBip = acum;
+      digitalWrite(BUZZER, !digitalRead(BUZZER));
+    }
+    digitalWrite(LED_STATUS, HIGH);
+  } else {
+    digitalWrite(BUZZER, LOW);
+    digitalWrite(LED_STATUS, LOW);
+  }
+}
+void setup() {
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(MOTOR_IN1, OUTPUT);
+  pinMode(MOTOR_IN2, OUTPUT);
+  pinMode(MOTOR_ENA, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
+  pinMode(LED_STATUS, OUTPUT);
+  digitalWrite(MOTOR_IN1, LOW);
+  digitalWrite(MOTOR_IN2, LOW);
+  analogWrite(MOTOR_ENA, 0);
+}
+void loop() {
+  unsigned long acum = millis();
+  if (acum - ultimaCitire >= INTERVAL_CITIRE) {
+    ultimaCitire = acum;
+    distantaCurenta = citesteDistanta();
+    valoarePot = analogRead(POTENTIOMETRU);
+    vitezaTinta = calculeazaViteza();
+  }
+  smoothViteza();
+  gestioneazaAlerta();
+}
